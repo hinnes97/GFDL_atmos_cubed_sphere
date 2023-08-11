@@ -319,6 +319,9 @@ module fv_control_mod
      logical, pointer :: restart_from_agrid_winds
      logical, pointer :: write_optional_dgrid_vel_rst
      logical, pointer :: pass_full_omega_to_physics_in_non_hydrostatic_mode
+
+     ! non_dilute switch
+     logical, pointer :: non_dilute
      !!!!!!!!!! END POINTERS !!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
      this_grid = -1 ! default
@@ -863,6 +866,8 @@ module fv_control_mod
        restart_from_agrid_winds      => Atm%flagstruct%restart_from_agrid_winds
        write_optional_dgrid_vel_rst  => Atm%flagstruct%write_optional_dgrid_vel_rst
        pass_full_omega_to_physics_in_non_hydrostatic_mode => Atm%flagstruct%pass_full_omega_to_physics_in_non_hydrostatic_mode
+
+       non_dilute                    => Atm%flagstruct%non_dilute
      end subroutine set_namelist_pointers
 
 
@@ -959,7 +964,8 @@ module fv_control_mod
             write_only_coarse_intermediate_restarts, &
             write_coarse_agrid_vel_rst, write_coarse_dgrid_vel_rst, &
             restart_from_agrid_winds, write_optional_dgrid_vel_rst, &
-            pass_full_omega_to_physics_in_non_hydrostatic_mode, ignore_rst_cksum
+            pass_full_omega_to_physics_in_non_hydrostatic_mode, ignore_rst_cksum,&
+            non_dilute
 
 
        ! Read FVCORE namelist

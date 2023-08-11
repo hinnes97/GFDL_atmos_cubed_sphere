@@ -21,7 +21,7 @@
 
 module dyn_core_mod
 
-  use constants_mod,      only: rdgas, cp_air, pi
+  use constants_mod,      only: rdgas, cp_air, pi, cp_vapor, rvgas
   use fv_arrays_mod,      only: radius ! scaled for small earth
   use mpp_mod,            only: mpp_pe
   use mpp_domains_mod,    only: CGRID_NE, DGRID_NE, mpp_get_boundary, mpp_update_domains,  &
@@ -38,6 +38,7 @@ module dyn_core_mod
   use fv_timing_mod,      only: timing_on, timing_off
   use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm
   use fv_diag_column_mod, only: do_diag_debug_dyn, debug_column_dyn
+  use tracer_manager_mod,  only: get_tracer_index
 #ifdef ROT3
   use fv_update_phys_mod, only: update_dwinds_phys
 #endif
@@ -63,7 +64,8 @@ module dyn_core_mod
   use fv_regional_mod,     only: dump_field, exch_uv, H_STAGGER, U_STAGGER, V_STAGGER
   use fv_regional_mod,     only: a_step, p_step, k_step, n_step
   use fast_phys_mod,       only: fast_phys
-
+  use field_manager_mod,   only: MODEL_ATMOS
+  use interp_mod, only: get_kappa_edge, get_kappa_edge_delp
 implicit none
 private
 
@@ -72,7 +74,7 @@ public :: dyn_core, del2_cubed, init_ijk_mem
   real :: ptk, peln1, rgrav
   real :: d3_damp
   real, allocatable, dimension(:,:,:) ::  ut, vt, crx, cry, xfx, yfx, divgd, &
-                                          zh, du, dv, pkc, delpc, pk3, ptc, gz
+                                          zh, du, dv, pkc, delpc, pk3, ptc, gz, cp_loc, r_loc
 ! real, parameter:: delt_max = 1.e-1   ! Max dissipative heating/cooling rate
                                        ! 6 deg per 10-min
   real(kind=R_GRID), parameter :: cnst_0p20=0.20d0
@@ -93,7 +95,7 @@ contains
                      u,  v,  w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va, &
                      uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, &
                      ks, gridstruct, flagstruct, neststruct, idiag, bd, domain, &
-                     init_step, i_pack, end_step, diss_est, consv, te0_2d, time_total)
+                     init_step, i_pack, end_step, diss_est, consv, te0_2d, time_total, kap_loc)
     integer, intent(IN) :: npx
     integer, intent(IN) :: npy
     integer, intent(IN) :: npz
@@ -120,6 +122,7 @@ contains
     real, intent(inout) :: diss_est(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)  !< skeb dissipation
     real, intent(in), optional:: time_total  ! total time (seconds) since start
 
+    real, intent(inout) :: kap_loc(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
 !-----------------------------------------------------------------------
 ! Auxilliary pressure arrays:
 ! The 5 vars below can be re-computed from delp and ptop.
@@ -179,6 +182,9 @@ contains
     real heat_s(bd%is:bd%ie,bd%js:bd%je)
 ! new array for stochastic kinetic energy backscatter (SKEB)
     real diss_e(bd%is:bd%ie,bd%js:bd%je)
+
+    !real pk_temp(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz+1)
+    !real cp_loc(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz)
     real damp_vt(npz+1)
     integer nord_v(npz+1)
 !-------------------------------------
@@ -199,7 +205,7 @@ contains
     real :: split_timestep_bc
 
     integer :: is,  ie,  js,  je
-    integer :: isd, ied, jsd, jed
+    integer :: isd, ied, jsd, jed, iv
 
       is  = bd%is
       ie  = bd%ie
@@ -249,8 +255,10 @@ contains
 
       if ( init_step ) then  ! Start of the big dynamic time stepping
 
-           allocate(    gz(isd:ied, jsd:jed ,npz+1) )
-             call init_ijk_mem(isd,ied, jsd,jed, npz+1, gz, huge_r)
+         allocate(    gz(isd:ied, jsd:jed ,npz+1) )
+         call init_ijk_mem(isd,ied, jsd,jed, npz+1, gz, huge_r)
+         allocate(cp_loc(isd:ied,jsd:jed,npz))
+         allocate(r_loc(isd:ied,jsd:jed,npz))
            allocate(   pkc(isd:ied, jsd:jed ,npz+1) )
            allocate(   ptc(isd:ied, jsd:jed ,npz ) )
            allocate( crx(is :ie+1, jsd:jed,  npz) )
@@ -475,8 +483,21 @@ contains
 #endif
       endif
       if ( hydrostatic ) then
-           call geopk(ptop, pe, peln, delpc, pkc, gz, phis, ptc, q_con, pkz, npz, akap, .true., &
-                      gridstruct%bounded_domain, .false., npx, npy, flagstruct%a2b_ord, bd)
+         iv = get_tracer_index(MODEL_ATMOS, 'vapour')
+         if (flagstruct%non_dilute) then
+!$OMP parallel do default(none) shared(jsd,jed,isd,ied,npz,cp_loc,q,r_loc,kap_loc,iv)            
+            do k=1,npz
+               do j=jsd,jed
+                  do i=isd,ied
+                     cp_loc(i,j,k) = q(i,j,k,iv)*cp_vapor + (1. - q(i,j,k,iv))*cp_air
+                     r_loc(i,j,k) = q(i,j,k,iv)*rvgas + (1. - q(i,j,k,iv))*rdgas
+                     kap_loc(i,j,k) = r_loc(i,j,k)/cp_loc(i,j,k)
+                  enddo
+               enddo
+            enddo
+         endif
+      call geopk(ptop, pe, peln, delpc, pkc, gz, phis, ptc, q_con, pkz, npz, akap, .true., &
+           gridstruct%bounded_domain, .false., npx, npy, flagstruct%a2b_ord, bd, flagstruct%non_dilute,kap_loc)!, r_loc)
       else
 #ifndef SW_DYNAMICS
            if ( it == 1 ) then
@@ -896,9 +917,21 @@ contains
 
 #endif
     endif
-     if ( hydrostatic ) then
+    if ( hydrostatic ) then
+       if (flagstruct%non_dilute) then
+!$OMP parallel do default(none) shared(jsd,jed,isd,ied,npz,cp_loc,q,r_loc,kap_loc,iv)        
+          do k=1,npz
+             do j=jsd,jed
+                do i=isd,ied
+                   cp_loc(i,j,k) = q(i,j,k,iv)*cp_vapor + (1. - q(i,j,k,iv))*cp_air
+                   r_loc(i,j,k) = q(i,j,k,iv)*rvgas + (1. - q(i,j,k,iv))*rdgas
+                   kap_loc(i,j,k) = r_loc(i,j,k)/cp_loc(i,j,k)
+                enddo
+             enddo
+          enddo
+       endif
           call geopk(ptop, pe, peln, delp, pkc, gz, phis, pt, q_con, pkz, npz, akap, .false., &
-                     gridstruct%bounded_domain, .true., npx, npy, flagstruct%a2b_ord, bd)
+                     gridstruct%bounded_domain, .true., npx, npy, flagstruct%a2b_ord, bd, flagstruct%non_dilute,kap_loc)!, r_loc)
        else
 #ifndef SW_DYNAMICS
         call timing_on('UPDATE_DZ')
@@ -974,8 +1007,8 @@ contains
                 pkc, gz, pk3, &
                 mod(reg_bc_update_time,bc_time_interval*3600.), bc_time_interval*3600., &
                 npx, npy, npz, gridstruct%bounded_domain, .true., .true., .true., bd)
-
-        endif
+          
+       endif
 
         call timing_on('COMM_TOTAL')
         call complete_group_halo_update(i_pack(4), domain)
@@ -1347,7 +1380,9 @@ contains
   endif
 
   if ( end_step ) then
-    deallocate(    gz )
+     deallocate(    gz )
+     deallocate(cp_loc)
+     deallocate(r_loc)
     deallocate(   ptc )
     deallocate(   crx )
     deallocate(   xfx )
@@ -2198,7 +2233,7 @@ do 1000 j=jfirst,jlast
  end subroutine  mix_dp
 
 
- subroutine geopk(ptop, pe, peln, delp, pk, gz, hs, pt, q_con, pkz, km, akap, CG, bounded_domain, computehalo, npx, npy, a2b_ord, bd)
+ subroutine geopk(ptop, pe, peln, delp, pk, gz, hs, pt, q_con, pkz, km, akap, CG, bounded_domain, computehalo, npx, npy, a2b_ord, bd, non_dilute, kap_loc)!,  r_loc)
 
    integer, intent(IN) :: km, npx, npy, a2b_ord
    real   , intent(IN) :: akap, ptop
@@ -2206,7 +2241,10 @@ do 1000 j=jfirst,jlast
    real   , intent(IN) :: hs(bd%isd:bd%ied,bd%jsd:bd%jed)
    real, intent(IN), dimension(bd%isd:bd%ied,bd%jsd:bd%jed,km):: pt, delp
    real, intent(IN), dimension(bd%isd:,bd%jsd:,1:):: q_con
-   logical, intent(IN) :: CG, bounded_domain, computehalo
+   logical, intent(IN) :: CG, bounded_domain, computehalo, non_dilute
+   real, intent(in) :: kap_loc(bd%isd:bd%ied,bd%jsd:bd%jed,km)
+   !real, intent(in) :: r_loc(bd%isd:bd%ied,bd%jsd:bd%jed,km)
+   
    ! !OUTPUT PARAMETERS
    real, intent(OUT), dimension(bd%isd:bd%ied,bd%jsd:bd%jed,km+1):: gz, pk
    real, intent(OUT) :: pe(bd%is-1:bd%ie+1,km+1,bd%js-1:bd%je+1)
@@ -2219,12 +2257,15 @@ do 1000 j=jfirst,jlast
    real pkg(bd%isd:bd%ied,km+1)
    real p1d(bd%isd:bd%ied)
    real logp(bd%isd:bd%ied)
+   real logp_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km+1)
+   real pkz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km)
+   !real gz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km+1)
    integer i, j, k
    integer ifirst, ilast
    integer jfirst, jlast
 
-      integer :: is,  ie,  js,  je
-      integer :: isd, ied, jsd, jed
+      integer :: is,  ie,  js,  je, iv
+      integer :: isd, ied, jsd, jed, maxl(3), it,jt,kt
 
       is  = bd%is
       ie  = bd%ie
@@ -2249,9 +2290,10 @@ do 1000 j=jfirst,jlast
       if (js == 1)     jfirst = jsd
       if (je == npy-1) jlast  = jed
    end if
-
+   
 !$OMP parallel do default(none) shared(jfirst,jlast,ifirst,ilast,pk,km,gz,hs,ptop,ptk, &
-!$OMP                                  js,je,is,ie,peln,peln1,pe,delp,akap,pt,CG,pkz,q_con) &
+!$OMP                                  js,je,is,ie,peln,peln1,pe,delp,akap,pt,CG,pkz,q_con, &
+!$OMP                                   logp_temp, pkz_temp, non_dilute, kap_loc) &
 !$OMP                          private(peg, pkg, p1d, logp)
    do 2000 j=jfirst,jlast
 
@@ -2259,6 +2301,7 @@ do 1000 j=jfirst,jlast
          p1d(i) = ptop
          pk(i,j,1) = ptk
          gz(i,j,km+1) = hs(i,j)
+         logp_temp(i,j,1) = log(ptop)
 #ifdef USE_COND
          peg(i,1) = ptop
          pkg(i,1) = ptk
@@ -2285,6 +2328,7 @@ do 1000 j=jfirst,jlast
             p1d(i)  = p1d(i) + delp(i,j,k-1)
             logp(i) = log(p1d(i))
             pk(i,j,k) = exp( akap*logp(i) )
+            logp_temp(i,j,k) = logp(i)
 #ifdef USE_COND
             peg(i,k) = peg(i,k-1) + delp(i,j,k-1)*(1.-q_con(i,j,k-1))
             pkg(i,k) = exp( akap*log(peg(i,k)) )
@@ -2304,30 +2348,50 @@ do 1000 j=jfirst,jlast
 
       enddo
 
+      if (non_dilute) then
+         do k=km,1,-1
+            do i=ifirst,ilast
+               pkz_temp(i,j,k) = exp(kap_loc(i,j,k)*log(delp(i,j,k)/(logp_temp(i,j,k+1) - logp_temp(i,j,k))))
+               gz(i,j,k) = gz(i,j,k+1) + pt(i,j,k)*rdgas *pkz_temp(i,j,k)*(logp_temp(i,j,k+1) - logp_temp(i,j,k))
+            enddo
+         enddo
+      else
       ! Bottom up
-      do k=km,1,-1
-         do i=ifirst, ilast
+         do k=km,1,-1
+            do i=ifirst, ilast
 #ifdef SW_DYNAMICS
-            gz(i,j,k) = gz(i,j,k+1) + pt(i,j,k)*(pk(i,j,k+1)-pk(i,j,k))
+               gz(i,j,k) = gz(i,j,k+1) + pt(i,j,k)*(pk(i,j,k+1)-pk(i,j,k))
 #else
 #ifdef USE_COND
-            gz(i,j,k) = gz(i,j,k+1) + cp_air*pt(i,j,k)*(pkg(i,k+1)-pkg(i,k))
+               gz(i,j,k) = gz(i,j,k+1) + cp_air*pt(i,j,k)*(pkg(i,k+1)-pkg(i,k))
 #else
-            gz(i,j,k) = gz(i,j,k+1) + cp_air*pt(i,j,k)*(pk(i,j,k+1)-pk(i,j,k))
+               gz(i,j,k) = gz(i,j,k+1) + cp_air*pt(i,j,k)*(pk(i,j,k+1) - pk(i,j,k))
 #endif
 #endif
-         enddo
-      enddo
-
-      if ( .not. CG .and. j .ge. js .and. j .le. je ) then
-         do k=1,km
-            do i=is,ie
-               pkz(i,j,k) = (pk(i,j,k+1)-pk(i,j,k))/(akap*(peln(i,k+1,j)-peln(i,k,j)))
             enddo
          enddo
       endif
 
+      if (non_dilute) then
+         if ( .not. CG .and. j .ge. js .and. j .le. je ) then
+            do k=1,km
+               do i=is,ie
+                  pkz(i,j,k) = pkz_temp(i,j,k)
+               enddo
+            enddo
+         endif
+      else
+         if ( .not. CG .and. j .ge. js .and. j .le. je ) then
+            do k=1,km
+               do i=is,ie
+                  pkz(i,j,k) = (pk(i,j,k+1)-pk(i,j,k))/(akap*(peln(i,k+1,j)-peln(i,k,j)))
+               enddo
+            enddo
+         endif
+      endif
+
 2000  continue
+
  end subroutine geopk
 
 

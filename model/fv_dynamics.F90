@@ -47,7 +47,6 @@ module fv_dynamics_mod
    use fv_arrays_mod,       only: fv_grid_type, fv_flags_type, fv_atmos_type, fv_nest_type, &
                                   fv_diag_type, fv_grid_bounds_type, inline_mp_type
    use fv_nwp_nudge_mod,    only: do_adiabatic_init
-
 implicit none
    logical :: RF_initialized = .false.
    logical :: pt_initialized = .false.
@@ -160,11 +159,15 @@ contains
       real:: m_fac(bd%is:bd%ie,bd%js:bd%je)
       real:: pfull(npz)
       real, dimension(bd%is:bd%ie):: cvm
-      real, allocatable :: dp1(:,:,:), cappa(:,:,:)
+      real :: pkz_temp(bd%is:bd%ie, bd%js:bd%je,1:npz)
+      real :: ps_temp(bd%isd:bd%ied, bd%jsd:bd%jed)
+      real, allocatable :: dp1(:,:,:), cappa(:,:,:), kap_loc(:,:,:)
+      !real :: kap_loc(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz)
+      !real :: kap_edge(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz+1)
       real:: akap, rdg, ph1, ph2, mdt, gam, amdt, u00
       real:: recip_k_split,reg_bc_update_time
       integer:: kord_tracer(ncnst)
-      integer :: i,j,k, n, iq, n_map, nq, nr, nwat, k_split
+      integer :: i,j,k, n, iq, n_map, nq, nr, nwat, k_split, iv
       integer :: sphum, liq_wat = -999, ice_wat = -999      ! GFDL physics
       integer :: rainwat = -999, snowwat = -999, graupel = -999, cld_amt = -999
       integer :: theta_d = -999
@@ -184,6 +187,8 @@ contains
       jsd = bd%jsd
       jed = bd%jed
 
+      iv = get_tracer_index(MODEL_ATMOS, 'vapour')
+
 !     cv_air =  cp_air - rdgas
       agrav = 1. / grav
         dt2 = 0.5*bdt
@@ -195,11 +200,12 @@ contains
       rdg = -rdgas * agrav
       allocate ( dp1(isd:ied, jsd:jed, 1:npz) )
 
-
 #ifdef MOIST_CAPPA
       allocate ( cappa(isd:ied,jsd:jed,npz) )
       call init_ijk_mem(isd,ied, jsd,jed, npz, cappa, 0.)
 #else
+      allocate(kap_loc(isd:ied,jsd:jed,1:npz))
+      call init_ijk_mem(isd,ied,jsd,jed,npz,kap_loc,0.0)
       allocate ( cappa(isd:isd,jsd:jsd,1) )
       cappa = 0.
 #endif
@@ -227,7 +233,6 @@ contains
     ! For the regional domain set values valid the beginning of the
     ! current large timestep at the boundary points of the pertinent
     ! prognostic arrays.
-
       if (flagstruct%regional) then
         call timing_on('Regional_BCs')
 
@@ -282,20 +287,32 @@ contains
       enddo
 
     if ( hydrostatic ) then
+       if (flagstruct%non_dilute) then
+!$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,dp1,q,iv,zvir)
+          do k=1,npz
+             do j=js,je
+                do i=is,ie
+                   dp1(i,j,k) = zvir*q(i,j,k,iv)
+                enddo
+             enddo
+          enddo
+       else
 !$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,dp1,zvir,nwat,q,q_con,sphum,liq_wat, &
-!$OMP      rainwat,ice_wat,snowwat,graupel) private(cvm)
-      do k=1,npz
-         do j=js,je
+!$OMP      rainwat,ice_wat,snowwat,graupel,iv) private(cvm)
+          
+          do k=1,npz
+             do j=js,je
 #ifdef USE_COND
-             call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
-                           ice_wat, snowwat, graupel, q, q_con(is:ie,j,k), cvm)
+                call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                     ice_wat, snowwat, graupel, q, q_con(is:ie,j,k), cvm)
 #endif
-            do i=is,ie
-               dp1(i,j,k) = zvir*q(i,j,k,sphum)
-            enddo
-         enddo
-      enddo
-    else
+                do i=is,ie
+                   dp1(i,j,k) = zvir*q(i,j,k,iv)
+                enddo
+             enddo
+          enddo
+       endif
+   else
 !$OMP parallel do default(none) shared(is,ie,js,je,isd,ied,jsd,jed,npz,dp1,zvir,q,q_con,sphum,liq_wat, &
 !$OMP                                  rainwat,ice_wat,snowwat,graupel,pkz,flagstruct, &
 !$OMP                                  cappa,kappa,rdg,delp,pt,delz,nwat)              &
@@ -365,7 +382,7 @@ contains
                                      gridstruct%rsin2, gridstruct%cosa_s, &
                                      zvir, cp_air, rdgas, hlv, te_2d, ua, va, teq,        &
                                      flagstruct%moist_phys, nwat, sphum, liq_wat, rainwat,   &
-                                     ice_wat, snowwat, graupel, hydrostatic, idiag%id_te)
+                                     ice_wat, snowwat, graupel, hydrostatic, idiag%id_te, iv, flagstruct%non_dilute)
            if( idiag%id_te>0 ) then
                used = send_data(idiag%id_te, teq, fv_time)
 !              te_den=1.E-9*g_sum(teq, is, ie, js, je, ng, area, 0)/(grav*4.*pi*radius**2)
@@ -395,6 +412,19 @@ contains
       endif
 
 ! Convert pt to virtual potential temperature on the first timestep
+      if (flagstruct%non_dilute) then
+!$OMP parallel do default(none) shared(is,ie,js,je,npz,iv,kap_loc, q, delp, peln, pkz, cp_air)         
+         do k=1,npz
+            do j=js,je
+               do i=is,ie
+                  kap_loc(i,j,k) = (rvgas*q(i,j,k,iv) + (1.-q(i,j,k,iv))*rdgas)/&
+                       (cp_vapor*q(i,j,k,iv) + cp_air*(1. - q(i,j,k,iv)))
+                  pkz(i,j,k) = exp(kap_loc(i,j,k)*log(delp(i,j,k)/(peln(i,k+1,j) - peln(i,k,j))))
+               enddo
+            enddo
+         enddo
+      endif
+      
 !$OMP parallel do default(none) shared(is,ie,js,je,npz,pt,dp1,pkz,q_con)
   do k=1,npz
      do j=js,je
@@ -473,14 +503,13 @@ contains
 #endif
      call timing_off('COMM_TOTAL')
 #endif
-
-      call timing_on('DYN_CORE')
+     call timing_on('DYN_CORE')
       call dyn_core(npx, npy, npz, ng, sphum, nq, mdt, n_map, n_split, zvir, cp_air, akap, cappa, grav, hydrostatic, &
                     u, v, w, delz, pt, q, delp, pe, pk, phis, ws, omga, ptop, pfull, ua, va,           &
                     uc, vc, mfx, mfy, cx, cy, pkz, peln, q_con, ak, bk, ks, &
                     gridstruct, flagstruct, neststruct, idiag, bd, &
                     domain, n_map==1, i_pack, last_step, diss_est, &
-                    consv_te, te_2d, time_total)
+                    consv_te, te_2d, time_total, kap_loc)
       call timing_off('DYN_CORE')
 
 #ifdef SW_DYNAMICS
@@ -588,7 +617,7 @@ contains
        enddo
 #endif
 
-     endif
+    endif
          call Lagrangian_to_Eulerian(last_step, consv_te, ps, pe, delp,          &
                      pkz, pk, mdt, bdt, npx, npy, npz, is,ie,js,je, isd,ied,jsd,jed,       &
                      nr, nwat, sphum, q_con, u,  v, w, delz, pt, q, phis,    &
@@ -601,7 +630,7 @@ contains
                      flagstruct%adiabatic, do_adiabatic_init, flagstruct%do_inline_mp, &
                      inline_mp, flagstruct%c2l_ord, bd, flagstruct%fv_debug, &
                      flagstruct%w_limiter, flagstruct%do_fast_phys, flagstruct%do_intermediate_phys, &
-                     flagstruct%consv_checker, flagstruct%adj_mass_vmr)
+                     flagstruct%consv_checker, flagstruct%adj_mass_vmr, flagstruct%non_dilute, kap_loc)
 
      if ( flagstruct%fv_debug ) then
         if (is_master()) write(*,'(A, I3, A1, I3)') 'finished k_split ', n_map, '/', k_split
@@ -762,7 +791,8 @@ contains
 
   deallocate(dp1)
   deallocate(cappa)
-
+  deallocate(kap_loc)
+  
   if ( flagstruct%fv_debug ) then
      call prt_mxm('UA', ua, is, ie, js, je, ng, npz, 1., gridstruct%area_64, domain)
      call prt_mxm('VA', va, is, ie, js, je, ng, npz, 1., gridstruct%area_64, domain)

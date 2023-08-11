@@ -927,6 +927,9 @@ module fv_arrays_mod
   logical :: pass_full_omega_to_physics_in_non_hydrostatic_mode = .false.  !< Default to passing local omega to physics in non-hydrostatic mode
   logical :: restart_from_agrid_winds = .false.  !< Whether to restart from A-grid winds
   logical :: write_optional_dgrid_vel_rst = .true. !< Whether to write out optional D-grid winds when restart_from_agrid_winds is active
+
+! HII added for non_dilute dynamical core (hydrostatic)
+  logical :: non_dilute = .false.
   end type fv_flags_type
 
   type fv_nest_BC_type_3D
