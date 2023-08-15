@@ -4237,8 +4237,9 @@ contains
   integer i,j,k
   real gg
 
-      gg  = rdgas * ginv
-
+  gg  = rdgas * ginv
+  
+!$OMP parallel do default(none) shared(js,je,is,ie,km,wz,zsurf,gg,pt,zvir,q,sphum,peln,delz,hydrostatic)
       do j=js,je
          do i=is,ie
             wz(i,j,km+1) = zsurf(i,j)
@@ -4257,7 +4258,7 @@ contains
             enddo
          enddo
       endif
-      enddo
+   enddo
 
  end subroutine get_height_field
 
