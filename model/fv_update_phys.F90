@@ -63,7 +63,7 @@ module fv_update_phys_mod
   subroutine fv_update_phys ( dt, is, ie, js, je, isd, ied, jsd, jed, ng, nq,     &
                               u, v, w, delp, pt, q, qdiag, ua, va, ps, pe,  peln, pk, pkz,  &
                               ak, bk, phis, u_srf, v_srf, ts, delz, hydrostatic,  &
-                              u_dt, v_dt, t_dt, moist_phys, Time, nudge,    &
+                              u_dt, v_dt, t_dt, ts_dt, moist_phys, Time, nudge,    &
                               gridstruct, lona, lata, npx, npy, npz, flagstruct,  &
                               neststruct, bd, domain, ptop, phys_diag, &
                               nudge_diag, q_dt)
@@ -93,6 +93,7 @@ module fv_update_phys_mod
 ! Tendencies from Physics:
     real, intent(inout), dimension(isd:ied,jsd:jed,npz):: u_dt, v_dt
     real, intent(inout):: t_dt(is:ie,js:je,npz)
+    real, intent(inout) :: ts_dt(is:ie,js:je,npz)
     real, intent(inout), optional :: q_dt(is:ie,js:je,npz,nq)
     type(phys_diag_type), intent(inout) :: phys_diag
     type(nudge_diag_type), intent(inout) :: nudge_diag

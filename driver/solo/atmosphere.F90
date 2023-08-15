@@ -56,6 +56,8 @@ use gfdl_mp_mod,        only: gfdl_mp_init, gfdl_mp_end
 use fv_nwp_nudge_mod,   only: fv_nwp_nudge_init, fv_nwp_nudge_end, do_adiabatic_init
 use field_manager_mod,  only: MODEL_ATMOS
 use tracer_manager_mod, only: get_tracer_index
+use exo_phys_mod, only : exo_tend_init
+use exo_phys_init_mod, only : exo_init
 !-----------------------------------------------------------------------
 
 implicit none
@@ -102,8 +104,8 @@ contains
 
     ! local:
     integer isc, iec, jsc, jec
-    real:: zvir
-    integer :: n, theta_d
+    real:: zvir, psat, qmin, pf
+    integer :: n, theta_d, iv,k, i,j
 
     integer :: nlunit = 9999
     character (len = 64) :: fn_nml = 'input.nml'
@@ -183,7 +185,16 @@ contains
                 Atm(mygrid)%npz,  Atm(mygrid)%flagstruct%hydrostatic, Atm(mygrid)%flagstruct%moist_phys)
         endif
 
+        call exo_tend_init(isc,iec,jsc,jec,Atm(mygrid)%npz, Atm(mygrid)%ncnst, Time, axes)
+        call exo_init(isc, iec, jsc, jec, Atm(mygrid)%npz, axes, Time, &
+             Atm(mygrid)%gridstruct%agrid(:,:,1), Atm(mygrid)%gridstruct%agrid(:,:,2), time_step_atmos, &
+             Atm(mygrid)%pt(isc:iec,jsc:jec,1:Atm(mygrid)%npz), Atm(mygrid)%ncnst, &
+             Atm(mygrid)%delp(isc:iec,jsc:jec,1:Atm(mygrid)%npz), &
+             Atm(mygrid)%peln(isc:iec,1:Atm(mygrid)%npz+1,jsc:jec), &
+             Atm(mygrid)%q(isc:iec,jsc:jec, 1:Atm(mygrid)%npz+1,Atm(mygrid)%ncnst) , &
+             cold_start, Atm(mygrid)%flagstruct%non_dilute)
 
+        
    call timing_off('ATMOS_INIT')
 
   end subroutine atmosphere_init
@@ -476,7 +487,7 @@ contains
 
 
    !For correct diagnostics (may need to be changed for moist Held-Suarez)
-   if ( Atm(n)%flagstruct%adiabatic .or. Atm(n)%flagstruct%do_Held_Suarez ) then
+   if ( Atm(n)%flagstruct%adiabatic) then! .or. Atm(n)%flagstruct%do_Held_Suarez ) then
        zvir = 0.         ! no virtual effect
     else
        zvir = rvgas/rdgas - 1.

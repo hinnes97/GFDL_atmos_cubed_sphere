@@ -44,6 +44,7 @@ use mpp_domains_mod,       only: domain2d
 use mpp_mod,               only: input_nml_file
 use diag_manager_mod,      only: register_diag_field, register_static_field, send_data
 use qs_tables_mod,         only: qs_wat_init, qs_wat
+use exo_phys_mod,          only : Exo_Tend
 
 implicit none
 
@@ -237,7 +238,7 @@ contains
     real, parameter:: sigb = 0.7
     logical:: no_tendency = .true.
     integer, parameter:: nmax = 2
-    real, allocatable:: u_dt(:,:,:), v_dt(:,:,:), t_dt(:,:,:), q_dt(:,:,:,:)
+    real, allocatable:: u_dt(:,:,:), v_dt(:,:,:), t_dt(:,:,:), q_dt(:,:,:,:), ts_dt(:,:,:)
     real, dimension(is:ie,npz):: dp2, pm, rdelp, u2, v2, t2, q2, du2, dv2, dt2, dq2
     real:: lcp(is:ie), den(is:ie)
     real:: rain(is:ie,js:je), rain2(is:ie), zint(is:ie,1:npz+1)
@@ -282,9 +283,10 @@ contains
      allocate ( v_dt(isd:ied,jsd:jed,npz) )
      allocate ( t_dt(is:ie,js:je,npz) )
      allocate ( q_dt(is:ie,js:je,npz,nq) )
+     allocate ( ts_dt(is:ie,js:je,npz) )
 
 ! Place the memory in the optimal shared mem space!
-!$OMP parallel do default(none) shared(isd,ied,jsd,jed,npz,is,ie,js,je,nq,u_dt,v_dt,t_dt,q_dt)
+!$OMP parallel do default(none) shared(isd,ied,jsd,jed,npz,is,ie,js,je,nq,u_dt,v_dt,t_dt,q_dt, ts_dt)
      do k=1, npz
         do j=jsd, jed
            do i=isd, ied
@@ -296,6 +298,7 @@ contains
         do j=js, je
            do i=is, ie
               t_dt(i,j,k) = 0.
+              ts_dt(i,j,k) = 0.
            enddo
         enddo
         do n=1,nq
@@ -598,11 +601,17 @@ contains
 
 
     if ( .not. no_tendency ) then
+       call timing_on('EXO_TEND')
+       call Exo_Tend(npx, npy, npz, is, ie, js, je, ng, nq, &
+            u, v, w, pt, q, ts, pe, delp, peln, pkz, pdt, &
+            ua, va, u_dt, v_dt, t_dt, ts_dt, q_dt, gridstruct%agrid, &
+            delz, hydrostatic, ak, bk, ks, .false., rayf, master, flagstruct%non_dilute, Time)
+       call timing_off('EXO_TEND')
     call timing_on('FV_UPDATE_PHYS')
     call fv_update_phys (pdt, is, ie, js, je, isd, ied, jsd, jed, ng, nq,   &
                          u, v, w, delp, pt, q, qdiag, ua, va, ps, pe, peln, pk, pkz,  &
                          ak, bk, phis, u_srf, v_srf, ts,  &
-                         delz, hydrostatic, u_dt, v_dt, t_dt, &
+                         delz, hydrostatic, u_dt, v_dt, t_dt, ts_dt, &
                          moist_phys, Time, .false., gridstruct, &
                          gridstruct%agrid(:,:,1), gridstruct%agrid(:,:,2), &
                          npx, npy, npz, flagstruct, neststruct, bd, domain, ptop, &
