@@ -21,19 +21,49 @@
 
 module init_hydro_mod
 
-      use constants_mod,      only: grav, rdgas, rvgas
+      use constants_mod,      only: grav, rdgas, rvgas, kappa, stefan
       use fv_grid_utils_mod,  only: g_sum
       use fv_mp_mod,          only: is_master
       use field_manager_mod,  only: MODEL_ATMOS
       use tracer_manager_mod, only: get_tracer_index
       use mpp_domains_mod,    only: domain2d
       use fv_arrays_mod,      only: R_GRID
+      use fms_mod,            only: FATAL, stdlog, mpp_error, check_nml_error
+      use mpp_mod,            only: input_nml_file
 !     use fv_diagnostics_mod, only: prt_maxmin
 
       implicit none
       private
 
       public :: p_var, hydro_eq, hydro_eq_ext
+
+! HI added:
+!---------------------------------------------------------------------------------------
+! Namelist values to read in 
+!---------------------------------------------------------------------------------------
+      
+!      namelist /initialisation_nml/ init_type, ts, T_strat, S, f, tau_sw, tau_lw, Tint, &
+!           surface_pressure
+!
+
+     namelist /initialisation_nml/ init_type, ts, t_strat, S, f, tau_sw, tau_lw, Tint, surface_pressure      
+! Default values of namelist arguments
+      integer :: init_type = 1   ! Select initialisation type:
+! 1: Isothermal atmosphere
+! 2: Guillot 2010 radiative equilibrium profile
+! 3: Dry adiabat initialisation
+      real    :: ts = 300.       ! Surface temperature
+      real    :: T_strat = 200.  ! Minimum stratospheric temperature. If init_type = 1, this is
+! the atmospheric temperature
+!
+! Required for pressure level setup
+      real :: surface_pressure
+!
+! Required for Guillot 2010 Initialisation
+      real  :: S = 1360.       ! Stellar constant
+      real  :: f = 1./4.       ! Flux redistribution constant (1/2 = dayside, 1/4 = global redist.)
+      real  :: tau_sw, tau_lw  ! Total SW and LW fluxes for the atmosphere  
+      real  :: Tint            ! Internal temperature
 
 contains
 
@@ -275,7 +305,7 @@ contains
 
 
  subroutine hydro_eq(km, is, ie, js, je, ps, hs, drym, delp, ak, bk,  &
-                     pt, delz, area, ng, mountain, hydrostatic, hybrid_z, domain)
+                     pt, tsurf, delz, area, ng, mountain, hydrostatic, hybrid_z, domain, agrid)
 ! Input:
   integer, intent(in):: is, ie, js, je, km, ng
   real, intent(in):: ak(km+1), bk(km+1)
@@ -286,9 +316,11 @@ contains
   logical, intent(in):: hybrid_z
   real(kind=R_GRID), intent(IN) :: area(is-ng:ie+ng,js-ng:je+ng)
   type(domain2d), intent(IN) :: domain
+  real, intent(in) :: agrid(is-ng:ie+ng,js-ng:je+ng, 2)
 ! Output
   real, intent(out):: ps(is-ng:ie+ng,js-ng:je+ng)
   real, intent(out)::   pt(is-ng:ie+ng,js-ng:je+ng,km)
+  real, intent(out) :: tsurf(is-ng:ie+ng, js-ng:je+ng)
   real, intent(out):: delp(is-ng:ie+ng,js-ng:je+ng,km)
   real, intent(inout):: delz(is:,js:,1:)
 ! Local
@@ -302,8 +334,17 @@ contains
   real dps    ! note that different PEs will get differt dps during initialization
               ! this has no effect after cold start
 #endif
-  real p0, gztop, ptop
-  integer  i,j,k
+  real p0, gztop, ptop, pf(km)
+  integer  i,j,k, f_unit, unit, ios, exists, ierr
+  logical master
+  character(80) :: filename
+
+! HI Added following:
+  read(input_nml_file, initialisation_nml, iostat=ios)
+  ierr=check_nml_error(ios, 'initialisation_nml')
+  unit = stdlog()
+  write(unit, nml=initialisation_nml)
+  
 
   if ( is_master() ) write(*,*) 'Initializing ATM hydrostatically'
 
@@ -341,7 +382,7 @@ contains
      mslp = drym  ! 1000.E2
      do j=js,je
         do i=is,ie
-           ps(i,j) = mslp
+           ps(i,j) = surface_pressure
         enddo
      enddo
      dps = 0.
@@ -426,18 +467,40 @@ contains
          do i=is,ie
               pt(i,j,k) = (gz(i,k)-gz(i,k+1))/(rdgas*(log(ph(i,k+1)/ph(i,k))))
               pt(i,j,k) = max(t1, pt(i,j,k))
-            delp(i,j,k) = ph(i,k+1) - ph(i,k)
-         enddo
+              delp(i,j,k) = ph(i,k+1) - ph(i,k)
+           enddo
+           pf(k) = (ph(is,k+1) - ph(is,k))/(log(ph(is,k+1)) - log(ph(is,k)))
+           if (k .eq. km .and. j .eq. je) then
+              write(*,*) pf(k), ph(is,k+1), ph(is,k), delp(is,je,k), delp(is,je,k)/(log(ph(is,k+1)) - log(ph(is,k)))
+           endif
       enddo
-      if (is_master() .and. j==js) then
-         i = is
-         do k=1,km
-            write(*,*) k, pt(i,j,k), gz(i,k+1), (gz(i,k)-gz(i,k+1)), ph(i,k)
-         enddo
-      endif
-
    enddo    ! j-loop
 
+
+
+   if (is_master()) then
+      write(*,*) 'test'
+      write(*,*) ph(ie,km+1), ph(ie,km), delp(ie,je,km), delp(ie,je,km)/(log(ph(ie,km+1)) - log(ph(ie,km)))
+      writE(*,*) 'ak, bk, ph'
+      do k=1,km+1
+         write(*,*) ak(k), bk(k), ph(is,k)
+      enddo
+      write(*,*) 'pf'
+      do k=1,km
+         write(*,*) pf(k), ps(is,js)
+      enddo
+      
+   endif
+
+   ! HI added:
+   call tp_init(is-ng, ie+ng, js-ng, je+ng, ng, km, pf, pt, agrid)
+   
+   do j=js,je
+      do i=is,ie
+         tsurf(i,j) = pt(i,j,km)
+      enddo
+   enddo
+   ! End HI added
 
  end subroutine hydro_eq
 
@@ -516,7 +579,7 @@ contains
      mslp = drym  ! 1000.E2
      do j=js,je
         do i=is,ie
-           ps(i,j) = mslp
+           ps(i,j)  = surface_pressure
         enddo
      enddo
      dps = 0.
@@ -610,5 +673,107 @@ contains
 
  end subroutine hydro_eq_ext
 
+ subroutine tp_init(is, ie, js, je, ng, num_levels, pf, Tf, agrid)
+    !---------------------------------------------------------------------------------------
+    ! Purpose: Initialising temperature grid at beginning of run                          
+    ! --------------------------------------------------------------------------------------
+
+    !---------------------------------------------------------------------------------------
+    ! Input arguments
+    !---------------------------------------------------------------------------------------
+    integer, intent(in) :: is,ie,js,je,ng,num_levels
+    real,    intent(in) :: pf(num_levels)
+    real, intent(in) :: agrid(is-ng:ie+ng,js-ng:je+ng, 2)
+    !---------------------------------------------------------------------------------------
+    ! Output arguments
+    !---------------------------------------------------------------------------------------
+    real, intent(out) :: Tf(is:ie, js:je, num_levels)
+
+
+    !---------------------------------------------------------------------------------------
+    ! Local arguments
+    !---------------------------------------------------------------------------------------
+    
+    integer :: i,j,k
+    logical :: master
+    character(80) :: filename
+
+    ! Required for Guillot 2010 setup
+    real, dimension(num_levels) :: tau ! Optical depth = tau_lw*(p/ps)
+    real  :: gamma, mu, lat_tl 
+    real  :: Tirr ! Irradiation temperature
+    
+    !---------------------------------------------------------------------------------------
+    ! Main body of function
+    !---------------------------------------------------------------------------------------
+
+! Select type of initialisation profile
+    select case(init_type)
+
+! Isothermal profile
+    case(1)
+       Tf(is:ie,js:je,1:num_levels) = T_strat
+
+! Guillot 2010, equation 29
+    case(2)
+       Tirr = (S/stefan)**0.25
+       tau = pf /surface_pressure * tau_lw!pf/surface_pressure * tau_lw
+       gamma = tau_sw/tau_lw
+       !gamma = tau_sw/tau_lw
+
+       do k=1,num_levels
+          Tf(is:ie,js:je,k) = ( 3./4.*Tint**4.*(2./3. + tau(k)) + &
+               3./4.*Tirr**4*f*(2./3. + 1./gamma/sqrt(3.) + &
+               (gamma/sqrt(3.) - 1./gamma/sqrt(3.))*exp(-gamma*tau(k)*sqrt(3.)) ) ) ** (0.25)
+       enddo
+
+!       if (is_master() ) then
+!          write(*,*) 'testing'
+!          write(*,*) 'tau', tau
+!          write(*,*) 'num_levels', num_levels
+!          write(*,*) 'gamma', gamma
+!          write(*,*)  'T_int', T_int
+!          write(*,*) 'sp', sp
+!          write(*,*) maxval(Tf(is:ie,js:je,1:num_levels)),minval(Tf(is:ie,js:je,1:num_levels))
+!       endif
+       
+! Dry adiabat
+    case(3)
+       do k=1, num_levels
+          do j=js,je
+             do i=is,ie
+                Tf(i,j,k) = ts* (pf(k)/pf(num_levels)) ** kappa
+                Tf(i,j,k) = max(Tf(i,j,k), T_strat)
+             end do
+          end do
+       end do
+
+! Guillot 2010, equation 27, + Koll 2015 equation B3
+    case(4)
+       Tirr = (S/stefan)**0.25
+       tau = pf/surface_pressure * tau_lw
+       gamma = tau_sw/tau_lw
+       do i=is,ie
+          do j=js,je
+             lat_tl = asin(cos(agrid(i,j,2))*cos(agrid(i,j,1)))
+             mu = cos(lat_tl)
+             do k=1,num_levels
+                Tf(i,j,k) = ( 3./4.*Tint**4.*(2./3. + tau(k)) + &
+                     3./4.*Tirr**4*mu*(2./3. + mu/gamma + &
+                     ((gamma/(3*mu)) - (mu/gamma)) * exp( -gamma*tau(k)/mu) ) )** (0.25)
+             enddo
+          enddo
+       enddo
+
+
+    end select
+
+    if (is_master()) then
+       write(*,*) 'Initialised TP'
+       do k=1,num_levels
+          write(*,*) pf(k), minval(Tf(is:ie,js:je,k)), maxval(Tf(is:ie,js:je,k))
+       enddo
+    endif
+  end subroutine tp_init
 
 end module init_hydro_mod

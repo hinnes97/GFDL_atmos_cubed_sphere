@@ -350,7 +350,7 @@ contains
              endif
              if (grid_type < 4) then
                 if ( .not. Atm(n)%flagstruct%external_ic ) then
-                   call init_case(Atm(n)%u,Atm(n)%v,Atm(n)%w,Atm(n)%pt,Atm(n)%delp,Atm(n)%q, &
+                   call init_case(Atm(n)%u,Atm(n)%v,Atm(n)%w,Atm(n)%pt,Atm(n)%ts,Atm(n)%delp,Atm(n)%q, &
                         Atm(n)%phis, Atm(n)%ps,Atm(n)%pe, Atm(n)%peln,Atm(n)%pk,Atm(n)%pkz, &
                         Atm(n)%uc,Atm(n)%vc, Atm(n)%ua,Atm(n)%va,        &
                         Atm(n)%ak, Atm(n)%bk, Atm(n)%gridstruct, Atm(n)%flagstruct,&
@@ -365,7 +365,7 @@ contains
                         Atm(n)%ptop, Atm(n)%domain, Atm(n)%tile_of_mosaic, Atm(n)%bd)
                 endif
              elseif (grid_type == 4) then
-                call init_double_periodic(Atm(n)%u,Atm(n)%v,Atm(n)%w,Atm(n)%pt, &
+                call init_double_periodic(Atm(n)%u,Atm(n)%v,Atm(n)%w,Atm(n)%pt, Atm(n)%ts,&
                      Atm(n)%delp,Atm(n)%q,Atm(n)%phis, Atm(n)%ps,Atm(n)%pe, &
                      Atm(n)%peln,Atm(n)%pk,Atm(n)%pkz, &
                      Atm(n)%uc,Atm(n)%vc, Atm(n)%ua,Atm(n)%va,        &

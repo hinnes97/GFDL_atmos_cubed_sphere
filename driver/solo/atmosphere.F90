@@ -58,6 +58,7 @@ use field_manager_mod,  only: MODEL_ATMOS
 use tracer_manager_mod, only: get_tracer_index
 use exo_phys_mod, only : exo_tend_init
 use exo_phys_init_mod, only : exo_init
+use fv_mp_mod, only : is_master
 !-----------------------------------------------------------------------
 
 implicit none
@@ -105,7 +106,7 @@ contains
     ! local:
     integer isc, iec, jsc, jec
     real:: zvir, psat, qmin, pf
-    integer :: n, theta_d, iv,k, i,j
+    integer :: n, theta_d, iv,k, i,j, npz
 
     integer :: nlunit = 9999
     character (len = 64) :: fn_nml = 'input.nml'
@@ -148,6 +149,7 @@ contains
      ied = Atm(mygrid)%bd%ied
      jsd = Atm(mygrid)%bd%jsd
      jed = Atm(mygrid)%bd%jed
+     npz = Atm(mygrid)%npz
 
      Atm(mygrid)%flagstruct%moist_phys = .false. ! need this for fv_diag calendar
      call fv_diag_init(Atm(mygrid:mygrid), axes, Time, Atm(mygrid)%npx, Atm(mygrid)%npy, Atm(mygrid)%npz, Atm(mygrid)%flagstruct%p_ref)
@@ -186,17 +188,15 @@ contains
         endif
 
         call exo_tend_init(isc,iec,jsc,jec,Atm(mygrid)%npz, Atm(mygrid)%ncnst, Time, axes)
-        call exo_init(isc, iec, jsc, jec, Atm(mygrid)%npz, axes, Time, &
-             Atm(mygrid)%gridstruct%agrid(:,:,1), Atm(mygrid)%gridstruct%agrid(:,:,2), time_step_atmos, &
-             Atm(mygrid)%pt(isc:iec,jsc:jec,1:Atm(mygrid)%npz), Atm(mygrid)%ncnst, &
-             Atm(mygrid)%delp(isc:iec,jsc:jec,1:Atm(mygrid)%npz), &
-             Atm(mygrid)%peln(isc:iec,1:Atm(mygrid)%npz+1,jsc:jec), &
-             Atm(mygrid)%q(isc:iec,jsc:jec, 1:Atm(mygrid)%npz+1,Atm(mygrid)%ncnst) , &
-             cold_start, Atm(mygrid)%flagstruct%non_dilute)
 
-        
+        call exo_init(isc,iec,jsc,jec,npz, Atm(mygrid)%ncnst, Atm(mygrid)%pt(isc:iec,jsc:jec,1:npz), Atm(mygrid)%delp(isc:iec,jsc:jec,1:npz), &
+             Atm(mygrid)%q(isc:iec,jsc:jec,1:npz,1:Atm(mygrid)%ncnst), Atm(mygrid)%peln(isc:iec,1:npz+1,jsc:jec), &
+             Atm(mygrid)%gridstruct%agrid(isc:iec,jsc:jec,1), Atm(mygrid)%gridstruct%agrid(isc:iec,jsc:jec,2), &
+             cold_start, Atm(mygrid)%flagstruct%non_dilute, &
+             axes, Time)
+                     
    call timing_off('ATMOS_INIT')
-
+! Changed file
   end subroutine atmosphere_init
 
  subroutine adiabatic_init(zvir, n)

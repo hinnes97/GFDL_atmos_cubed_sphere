@@ -600,8 +600,13 @@ contains
 !-------------------
 ! Surface pressure
 !-------------------
-       id_ps = register_diag_field ( trim(field), 'ps', axes(1:2), Time,           &
-            'surface pressure', 'Pa', missing_value=missing_value, range=psrange)
+       if (Atm(n)%flagstruct%is_ideal_case) then
+          id_ps = register_diag_field ( trim(field), 'ps', axes(1:2), Time,           &
+               'surface pressure', 'Pa', missing_value=missing_value)
+       else
+          id_ps = register_diag_field ( trim(field), 'ps', axes(1:2), Time,           &
+               'surface pressure', 'Pa', missing_value=missing_value, range=psrange)
+       endif
 
 !-------------------
 ! Mountain torque

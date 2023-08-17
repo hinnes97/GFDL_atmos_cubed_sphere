@@ -22,16 +22,24 @@
 module fv_eta_mod
  use constants_mod,  only: kappa, grav, cp_air, rdgas
  use fv_mp_mod,      only: is_master
- use fms_mod,        only: FATAL, error_mesg
+ use fms_mod,        only: FATAL, error_mesg, stdlog, check_nml_error, write_version_number
  use fms2_io_mod,    only: ascii_read
+ use mpp_mod,        only: input_nml_file
+ 
  implicit none
  private
  public set_eta, set_external_eta, get_eta_level, compute_dz_var,  &
         compute_dz_L32, compute_dz_L101, set_hybrid_z, compute_dz, &
         gw_1d, sm1_edge, hybrid_z_dz
 
- contains
+ namelist /fv_eta_nml/ flexible_grid, pbot, pup, plin
+ logical        :: flexible_grid = .false. ! Switch
+ real           :: pbot = 1.e6             ! Bottom boundary pressure
+ real           :: pup = 5.e-2             ! Upper boundary pressure
+ real           :: plin = 1.e1             ! Where linear spacing of levels starts
 
+ contains
+    
 !!!NOTE: USE_VAR_ETA not used in fvGFS
 !!! This routine will be kept here
 !!! for the time being to not disrupt idealized tests
@@ -291,6 +299,16 @@ module fv_eta_mod
    real :: stretch_fac = 1.03
    integer :: auto_routine = 0
 
+   character(80) :: filename
+   integer       :: ios, unit, f_unit, ierr
+
+   filename = "input.nml"
+
+   read(input_nml_file, fv_eta_nml, iostat=ios)
+   ierr = check_nml_error(ios, 'fv_eta_nml')
+   
+   unit = stdlog()
+   write(unit, nml=fv_eta_nml)
 
    ptop = 1.
 
@@ -355,8 +373,11 @@ module fv_eta_mod
        end do
        deallocate (eta_level_unit)
        call set_external_eta(ak, bk, ptop, ks)
-   else
 
+   ! HII adding here
+   else if (flexible_grid) then
+      call flexible_grid_generator(km, ak, bk)
+   else
       select case (km)
 
       case (5,10) ! does this work????
@@ -1915,6 +1936,52 @@ module fv_eta_mod
 
  end subroutine check_eta_levels
 
+ subroutine flexible_grid_generator(km, ak, bk)
+   !=============================================================================
+   ! Description - Generates coefficients log spaced between pbot and plin
+   !               and then linearly spaced between plin and pup. Linear spacing
+   !               in upper atmosphere preferred for RT calculations where log
+   !               spacing leads to many levels needing small tau approx.
+   !               Translated from Elsie Lee's python script
+   !=============================================================================
+
+   !=============================================================================
+   ! Input arguments
+   !=============================================================================
+   integer, intent(in) :: km 
+
+   !=============================================================================
+   ! Output arguments
+   !=============================================================================
+   real, intent(out) :: ak(km+1) 
+   real, intent(out) :: bk(km+1)
+
+   !============================================================================
+   ! Local variables
+   !============================================================================
+   integer :: k
+   real    :: log_pk(km+1)
+   
+   !=============================================================================
+   ! Main body begins here
+   !=============================================================================
+
+   ! Generate log spaced pressures between pbot and pup for bk 
+   do k=1, km+1
+      log_pk(k) = log(pup) + real((k-1))/real(km) * log(pbot/pup)
+      bk(k) = exp(log_pk(k))/pbot
+   end do
+   
+   ! Generate linearly spaced pressures between pup and plin for ak
+   do k=1, km+1
+      ak(k) = pup + real((k-1))/real(km) * (plin - pup)
+   end do
+
+   ! Ensure that ak(km+1) and bk(km+1) are 0 and 1 respectively
+   ak(km+1) = 0.
+   bk(km+1) = 1.
+   
+ end subroutine flexible_grid_generator
 
  subroutine get_eta_level(npz, p_s, pf, ph, ak, bk, pscale)
   integer, intent(in) :: npz

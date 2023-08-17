@@ -511,7 +511,7 @@
 !                  case 6 (Rossby Wave-4 Case)
 !                  case 9 (Stratospheric Vortex Breaking Case)
 !
-      subroutine init_case(u,v,w,pt,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
+      subroutine init_case(u,v,w,pt,tsurf,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
                            gridstruct, flagstruct, npx, npy, npz, ng, ncnst, nwat, ndims, nregions,        &
                            dry_mass, mountain, moist_phys, hydrostatic, hybrid_z, delz, ze0, adiabatic, &
                            ks, npx_global, ptop, domain_in, tile_in, bd)
@@ -521,6 +521,7 @@
       real ,      intent(INOUT) ::    v(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)
       real ,      intent(INOUT) ::    w(bd%isd:  ,bd%jsd:  ,1:)
       real ,      intent(INOUT) ::   pt(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
+      real ,      intent(INOUT) ::   tsurf(bd%isd:bd%ied  ,bd%jsd:bd%jed)
       real ,      intent(INOUT) :: delp(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
       real ,      intent(INOUT) ::    q(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, ncnst)
 
@@ -1508,7 +1509,7 @@
 ! Aqua-planet case: mean SLP=1.E5
          phis = 0.0
          call hydro_eq(npz, is, ie, js, je, ps, phis, 1.E5,      &
-                       delp, ak, bk, pt, delz, area, ng, .false., hydrostatic, hybrid_z, domain)
+                       delp, ak, bk, pt, tsurf, delz, area, ng, .false., hydrostatic, hybrid_z, domain, agrid)
        else
 ! Initialize topography
          gh0  = 5960.*Grav
@@ -1526,7 +1527,7 @@
             enddo
          enddo
          call hydro_eq(npz, is, ie, js, je, ps, phis, dry_mass,  &
-                       delp, ak, bk, pt, delz, area, ng, mountain, hydrostatic, hybrid_z, domain)
+                       delp, ak, bk, pt, tsurf, delz, area, ng, mountain, hydrostatic, hybrid_z, domain, agrid)
        endif
 
       else if (test_case==11) then
@@ -1566,7 +1567,7 @@
        q(:,:,:,1) = 3.e-6
 
        call hydro_eq(npz, is, ie, js, je, ps, phis, dry_mass,  &
-                     delp, ak, bk, pt, delz, area, ng, mountain, hydrostatic, hybrid_z, domain)
+                     delp, ak, bk, pt, tsurf, delz, area, ng, mountain, hydrostatic, hybrid_z, domain, agrid)
 
       else if ( (test_case==12) .or. (test_case==13) ) then
 
@@ -4529,7 +4530,7 @@ end subroutine terminator_tracers
 ! vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv !
 !     init_double_periodic
 !
-      subroutine init_double_periodic(u,v,w,pt,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
+      subroutine init_double_periodic(u,v,w,pt,tsurf,delp,q,phis, ps,pe,peln,pk,pkz,  uc,vc, ua,va, ak, bk,  &
                                       gridstruct, flagstruct, npx, npy, npz, ng, ncnst, nwat, ndims, nregions, dry_mass, &
                                       mountain, moist_phys, hydrostatic, hybrid_z, delz, ze0, ks, ptop, domain_in, tile_in, bd)
 
@@ -4539,6 +4540,7 @@ end subroutine terminator_tracers
         real ,      intent(INOUT) ::    v(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)
         real ,      intent(INOUT) ::    w(bd%isd:  ,bd%jsd:  ,1:)
         real ,      intent(INOUT) ::   pt(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
+        real ,      intent(INOUT) ::   tsurf(bd%isd:bd%ied  ,bd%jsd:bd%jed) 
         real ,      intent(INOUT) :: delp(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
         real ,      intent(INOUT) ::    q(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, ncnst)
 
@@ -4741,7 +4743,7 @@ end subroutine terminator_tracers
            phis(:,:) = 0.
 
            call hydro_eq(npz, is, ie, js, je, ps, phis, dry_mass,      &
-                         delp, ak, bk, pt, delz, area, ng, .false., hydrostatic, hybrid_z, domain)
+                         delp, ak, bk, pt, tsurf,delz, area, ng, .false., hydrostatic, hybrid_z, domain, agrid)
 
           if ( hydrostatic ) then
           call p_var(npz, is, ie, js, je, ptop, ptop_min, delp, delz, pt, ps,   &
