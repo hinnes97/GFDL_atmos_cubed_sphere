@@ -320,7 +320,7 @@ contains
 ! Output
   real, intent(out):: ps(is-ng:ie+ng,js-ng:je+ng)
   real, intent(out)::   pt(is-ng:ie+ng,js-ng:je+ng,km)
-  real, intent(out) :: tsurf(is-ng:ie+ng, js-ng:je+ng)
+  real, intent(out) :: tsurf(is:ie, js:je)
   real, intent(out):: delp(is-ng:ie+ng,js-ng:je+ng,km)
   real, intent(inout):: delz(is:,js:,1:)
 ! Local

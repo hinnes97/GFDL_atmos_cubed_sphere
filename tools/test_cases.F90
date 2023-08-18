@@ -521,7 +521,7 @@
       real ,      intent(INOUT) ::    v(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)
       real ,      intent(INOUT) ::    w(bd%isd:  ,bd%jsd:  ,1:)
       real ,      intent(INOUT) ::   pt(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
-      real ,      intent(INOUT) ::   tsurf(bd%isd:bd%ied  ,bd%jsd:bd%jed)
+      real ,      intent(INOUT) ::   tsurf(bd%isc:bd%iec  ,bd%jsc:bd%jec)
       real ,      intent(INOUT) :: delp(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
       real ,      intent(INOUT) ::    q(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, ncnst)
 
@@ -4540,7 +4540,7 @@ end subroutine terminator_tracers
         real ,      intent(INOUT) ::    v(bd%isd:bd%ied+1,bd%jsd:bd%jed  ,npz)
         real ,      intent(INOUT) ::    w(bd%isd:  ,bd%jsd:  ,1:)
         real ,      intent(INOUT) ::   pt(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
-        real ,      intent(INOUT) ::   tsurf(bd%isd:bd%ied  ,bd%jsd:bd%jed) 
+        real ,      intent(INOUT) ::   tsurf(bd%isc:bd%iec  ,bd%jsc:bd%jec) 
         real ,      intent(INOUT) :: delp(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz)
         real ,      intent(INOUT) ::    q(bd%isd:bd%ied  ,bd%jsd:bd%jed  ,npz, ncnst)
 
