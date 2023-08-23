@@ -30,7 +30,7 @@ module fv_update_phys_mod
   use time_manager_mod,   only: time_type
   use tracer_manager_mod, only: get_tracer_index, adjust_mass, get_tracer_names
   use fv_mp_mod,          only: start_group_halo_update, complete_group_halo_update
-  use fv_mp_mod,          only: group_halo_update_type
+  use fv_mp_mod,          only: group_halo_update_type, is_master
   use fv_arrays_mod,      only: fv_flags_type, fv_nest_type, R_GRID, phys_diag_type, nudge_diag_type
   use boundary_mod,       only: nested_grid_BC
   use boundary_mod,       only: extrapolation_BC
@@ -38,6 +38,8 @@ module fv_update_phys_mod
   use fv_timing_mod,      only: timing_on, timing_off
   use fv_diagnostics_mod, only: prt_maxmin, range_check, Mw_air!_0d
   use fv_mapz_mod,        only: moist_cv, moist_cp
+  use exo_phys_mod,       only: do_ding_convection
+  
 #if defined (ATMOS_NUDGE)
   use atmos_nudge_mod,    only: get_atmos_nudge, do_ps
 #elif defined (CLIMATE_NUDGE)
@@ -66,7 +68,7 @@ module fv_update_phys_mod
                               u_dt, v_dt, t_dt, ts_dt, moist_phys, Time, nudge,    &
                               gridstruct, lona, lata, npx, npy, npz, flagstruct,  &
                               neststruct, bd, domain, ptop, phys_diag, &
-                              nudge_diag, q_dt)
+                              nudge_diag, q_dt, non_dilute, q_correct)
     real, intent(in)   :: dt, ptop
     integer, intent(in):: is,  ie,  js,  je, ng
     integer, intent(in):: isd, ied, jsd, jed
@@ -75,6 +77,7 @@ module fv_update_phys_mod
     logical, intent(in):: moist_phys
     logical, intent(in):: hydrostatic
     logical, intent(in):: nudge
+    logical, optional, intent(in) :: non_dilute
 
     type (time_type), intent(in) :: Time
 
@@ -95,6 +98,7 @@ module fv_update_phys_mod
     real, intent(inout):: t_dt(is:ie,js:je,npz)
     real, intent(inout) :: ts_dt(is:ie,js:je,npz)
     real, intent(inout), optional :: q_dt(is:ie,js:je,npz,nq)
+    real, intent(in), optional :: q_correct(is:ie,js:je,npz)
     type(phys_diag_type), intent(inout) :: phys_diag
     type(nudge_diag_type), intent(inout) :: nudge_diag
 
@@ -150,7 +154,7 @@ module fv_update_phys_mod
     integer  sphum, liq_wat, ice_wat, cld_amt   ! GFDL AM physics
     integer  rainwat, snowwat, graupel          ! GFDL Cloud Microphysics
     integer  w_diff                             ! w-tracer for PBL diffusion
-    real:: qstar, dbk, rdg, zvir, p_fac, cv_air, gama_dt, tbad
+    real:: qstar, dbk, rdg, zvir, p_fac, cv_air, gama_dt, tbad, vap
     logical :: bad_range
 
 !f1p
@@ -190,7 +194,8 @@ module fv_update_phys_mod
     snowwat = get_tracer_index (MODEL_ATMOS, 'snowwat')
     graupel = get_tracer_index (MODEL_ATMOS, 'graupel')
     cld_amt = get_tracer_index (MODEL_ATMOS, 'cld_amt')
-
+    vap     = get_tracer_index (MODEL_ATMOS, 'vapour')
+    
     if ( .not. hydrostatic ) then
         w_diff = get_tracer_index (MODEL_ATMOS, 'w_diff')
 !       if ( w_diff<8 ) call mpp_error(FATAL,'W_tracer index error')
@@ -268,7 +273,8 @@ module fv_update_phys_mod
 !$OMP                    nq,w_diff,dt,nwat,liq_wat,rainwat,ice_wat,snowwat,    &
 !$OMP                    graupel,delp,cld_amt,hydrostatic,pt,t_dt,delz,adj_vmr,&
 !$OMP                    gama_dt,cv_air,ua,u_dt,va,v_dt,isd,ied,jsd,jed,          &
-!$OMP                    conv_vmr_mmr,pe,ptop,gridstruct,phys_diag)            &
+!$OMP                    conv_vmr_mmr,pe,ptop,gridstruct,phys_diag, do_ding_convection, &
+!$OMP                    vap, q_correct, non_dilute)    &
 !$OMP             private(cvm, qc, qstar, ps_dt, p_fac, tbad)
     do k=1, npz
 
@@ -329,6 +335,15 @@ module fv_update_phys_mod
 !--------------------------------------------------------
 ! Adjust total air mass due to changes in water substance
 !--------------------------------------------------------
+
+       if (do_ding_convection) then
+          do j=js,je
+             do i=is,ie
+                ps_dt(i,j) = 1. + dt*q_dt(i,j,k,vap) - q_correct(i,j,k)
+                delp(i,j,k) = delp(i,j,k)*ps_dt(i,j)
+             enddo
+          enddo
+       else
       do j=js,je
          do i=is,ie
             ps_dt(i,j)  = 1. + dt*sum(q_dt(i,j,k,1:nwat))
@@ -343,11 +358,14 @@ module fv_update_phys_mod
             end if
          enddo
       enddo
-
+   endif
 
 !-----------------------------------------
 ! Adjust mass mixing ratio of all tracers
 !-----------------------------------------
+      if (do_ding_convection) then
+         q(is:ie,js:je,k,vap) = q(is:ie,js:je,k,vap) / ps_dt(is:ie,js:je)
+      else
       if ( nwat /=0 ) then
         do m=1,flagstruct%ncnst
 !-- check to query field_table to determine if tracer needs mass adjustment
@@ -367,17 +385,27 @@ module fv_update_phys_mod
         enddo
       endif
 
+      endif
       endif ! present(q_dt)
 
       if ( hydrostatic ) then
-         do j=js,je
-            call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
-                          ice_wat, snowwat, graupel, q, qc, cvm, pt(is:ie,j,k) )
-            do i=is,ie
-!!!            pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt
-               pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt*con_cp/cvm(i)
+         if (non_dilute) then
+! Exo_tend takes care of the variable cp
+            do j=js,je
+               do i=is,ie
+                  pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt
+               enddo
             enddo
-          enddo
+         else
+            do j=js,je
+               call moist_cp(is,ie,isd,ied,jsd,jed, npz, j, k, nwat, sphum, liq_wat, rainwat,    &
+                    ice_wat, snowwat, graupel, q, qc, cvm, pt(is:ie,j,k) )
+               do i=is,ie
+!!!            pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt
+                  pt(i,j,k) = pt(i,j,k) + t_dt(i,j,k)*dt*con_cp/cvm(i)
+               enddo
+            enddo
+         endif
        else
          if ( flagstruct%phys_hydrostatic ) then
 ! Constant pressure

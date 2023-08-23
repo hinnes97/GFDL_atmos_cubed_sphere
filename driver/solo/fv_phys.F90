@@ -244,6 +244,7 @@ contains
     real:: rain(is:ie,js:je), rain2(is:ie), zint(is:ie,1:npz+1)
     real:: dq, dqsdt, delm, adj, rkv, sigl, tmp, prec, rgrav
     real :: qdiag(1,1,1)
+    real :: q_correct(is:ie,js:je,1:npz)
     logical moist_phys
     integer  isd, ied, jsd, jed
     integer  i, j, k, m, n, int
@@ -605,7 +606,8 @@ contains
        call Exo_Tend(npx, npy, npz, is, ie, js, je, ng, nq, &
             u, v, w, pt, q, ts, pe, delp, peln, pkz, pdt, &
             ua, va, u_dt, v_dt, t_dt, ts_dt, q_dt, gridstruct%agrid, &
-            delz, hydrostatic, ak, bk, ks, .false., rayf, master, flagstruct%non_dilute, Time)
+            delz, hydrostatic, ak, bk, ks, .false., rayf, master, flagstruct%non_dilute, Time, &
+            q_correct)
        call timing_off('EXO_TEND')
     call timing_on('FV_UPDATE_PHYS')
     call fv_update_phys (pdt, is, ie, js, je, isd, ied, jsd, jed, ng, nq,   &
@@ -615,7 +617,7 @@ contains
                          moist_phys, Time, .false., gridstruct, &
                          gridstruct%agrid(:,:,1), gridstruct%agrid(:,:,2), &
                          npx, npy, npz, flagstruct, neststruct, bd, domain, ptop, &
-                         phys_diag, nudge_diag, q_dt=q_dt)
+                         phys_diag, nudge_diag, q_dt=q_dt, non_dilute=flagstruct%non_dilute, q_correct=q_correct)
 
     call timing_off('FV_UPDATE_PHYS')
     endif

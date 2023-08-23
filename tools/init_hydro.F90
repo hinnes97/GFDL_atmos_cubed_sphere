@@ -470,27 +470,8 @@ contains
               delp(i,j,k) = ph(i,k+1) - ph(i,k)
            enddo
            pf(k) = (ph(is,k+1) - ph(is,k))/(log(ph(is,k+1)) - log(ph(is,k)))
-           if (k .eq. km .and. j .eq. je) then
-              write(*,*) pf(k), ph(is,k+1), ph(is,k), delp(is,je,k), delp(is,je,k)/(log(ph(is,k+1)) - log(ph(is,k)))
-           endif
       enddo
    enddo    ! j-loop
-
-
-
-   if (is_master()) then
-      write(*,*) 'test'
-      write(*,*) ph(ie,km+1), ph(ie,km), delp(ie,je,km), delp(ie,je,km)/(log(ph(ie,km+1)) - log(ph(ie,km)))
-      writE(*,*) 'ak, bk, ph'
-      do k=1,km+1
-         write(*,*) ak(k), bk(k), ph(is,k)
-      enddo
-      write(*,*) 'pf'
-      do k=1,km
-         write(*,*) pf(k), ps(is,js)
-      enddo
-      
-   endif
 
    ! HI added:
    call tp_init(is-ng, ie+ng, js-ng, je+ng, ng, km, pf, pt, agrid)
@@ -770,6 +751,7 @@ contains
 
     if (is_master()) then
        write(*,*) 'Initialised TP'
+       write(*,*) 'Pressure (Pa), Temperature (K)'
        do k=1,num_levels
           write(*,*) pf(k), minval(Tf(is:ie,js:je,k)), maxval(Tf(is:ie,js:je,k))
        enddo
