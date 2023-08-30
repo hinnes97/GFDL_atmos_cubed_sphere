@@ -204,15 +204,15 @@ contains
 
 !!!  This will need mods for more than 1 tile per pe  !!!
 
-    vsrange = (/ -200.,  200. /)  ! surface (lowest layer) winds
+    vsrange = (/ -2000.,  2000. /)  ! surface (lowest layer) winds
 
-    vrange = (/ -330.,  330. /)  ! winds
+    vrange = (/ -20000.,  20000. /)  ! winds
     wrange = (/ -100.,  100. /)  ! vertical wind
    rhrange = (/  -10.,  150. /)  ! RH
 #ifdef HIWPP
     trange = (/    5.,  350. /)  ! temperature
 #else
-    trange = (/  100.,  350. /)  ! temperature
+    trange = (/  100.,  35000. /)  ! temperature
 #endif
     slprange = (/800.,  1200./)  ! sea-level-pressure
     skrange  = (/ -10000000.0,  10000000.0 /)  ! dissipation estimate for SKEB
