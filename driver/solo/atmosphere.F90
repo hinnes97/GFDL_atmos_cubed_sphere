@@ -191,7 +191,6 @@ contains
 
         call exo_init(isc,iec,jsc,jec,npz, Atm(mygrid)%ncnst, Atm(mygrid)%pt(isc:iec,jsc:jec,1:npz), Atm(mygrid)%delp(isc:iec,jsc:jec,1:npz), &
              Atm(mygrid)%q(isc:iec,jsc:jec,1:npz,1:Atm(mygrid)%ncnst), Atm(mygrid)%peln(isc:iec,1:npz+1,jsc:jec), &
-             Atm(mygrid)%gridstruct%agrid(isc:iec,jsc:jec,1), Atm(mygrid)%gridstruct%agrid(isc:iec,jsc:jec,2), &
              cold_start, Atm(mygrid)%flagstruct%non_dilute, &
              axes, Time)
                      
