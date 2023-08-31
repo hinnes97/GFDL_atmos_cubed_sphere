@@ -36,7 +36,7 @@ module dyn_core_mod
   use nh_core_mod,        only: nh_bc, edge_profile1
   use tp_core_mod,        only: copy_corners
   use fv_timing_mod,      only: timing_on, timing_off
-  use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm
+  use fv_diagnostics_mod, only: prt_maxmin, fv_time, prt_mxm, prt_mass
   use fv_diag_column_mod, only: do_diag_debug_dyn, debug_column_dyn
   use tracer_manager_mod,  only: get_tracer_index
 #ifdef ROT3
@@ -83,6 +83,7 @@ public :: dyn_core, del2_cubed, init_ijk_mem
   integer:: k_rf = 0
   logical:: RFF_initialized = .false.
   integer :: kmax=1
+  integer :: count = 0
   real, parameter    ::     rad2deg = 180./pi
 
 contains
@@ -169,6 +170,7 @@ contains
     real, dimension(bd%isd:bd%ied,bd%jsd:bd%jed):: ws3, z_rat
     real:: dp_ref(npz)
     real:: zs(bd%isd:bd%ied,bd%jsd:bd%jed)        ! surface height (m)
+    real:: ps_temp(bd%isd:bd%ied,bd%jsd:bd%jed)        ! surface height (m)
     real:: p1d(bd%is:bd%ie)
     real:: om2d(bd%is:bd%ie,npz)
     real wbuffer(npy+2,npz)
@@ -183,7 +185,8 @@ contains
 ! new array for stochastic kinetic energy backscatter (SKEB)
     real diss_e(bd%is:bd%ie,bd%js:bd%je)
 
-    !real pk_temp(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz+1)
+    
+    real gz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz+1)
     !real cp_loc(bd%isd:bd%ied,bd%jsd:bd%jed,1:npz)
     real damp_vt(npz+1)
     integer nord_v(npz+1)
@@ -466,6 +469,7 @@ contains
               0, 0, npx, npy, npz, bd, split_timestep_BC+0.5, real(n_split*flagstruct%k_split), &
               neststruct%pt_BC, bctype=neststruct%nestbctype )
 #endif
+          
       endif
       if (flagstruct%regional) then
         reg_bc_update_time=current_time_in_seconds+bdt*(n_map-1)+(0.5+(it-1))*dt
@@ -496,8 +500,19 @@ contains
                enddo
             enddo
          endif
-      call geopk(ptop, pe, peln, delpc, pkc, gz, phis, ptc, q_con, pkz, npz, akap, .true., &
-           gridstruct%bounded_domain, .false., npx, npy, flagstruct%a2b_ord, bd, flagstruct%non_dilute,kap_loc)!, r_loc)
+
+! For some reason, first call of this doesn't conserve delp in non dilute version. Turning off for
+! first timestep seems to solve problem.
+        if (count > 0) then
+            call geopk(ptop, pe, peln, delpc, pkc, gz, phis, ptc, q_con, pkz, npz, akap, .true., &
+                 gridstruct%bounded_domain, .false., npx, npy, flagstruct%a2b_ord, bd, flagstruct%non_dilute,kap_loc)!, r_loc)
+         else
+            call geopk(ptop, pe, peln, delpc, pkc, gz, phis, ptc, q_con, pkz, npz, akap, .true., &
+                 gridstruct%bounded_domain, .false., npx, npy, flagstruct%a2b_ord, bd, .false.,kap_loc)!, r_loc)
+            count = count + 1
+         endif
+!         
+
       else
 #ifndef SW_DYNAMICS
            if ( it == 1 ) then
@@ -779,7 +794,8 @@ contains
                z_rat(i,j) = 1. + (zh(i,j,k)+zh(i,j,k+1))/radius
             enddo
          enddo
-       endif
+      endif
+
        call d_sw(vt(isd,jsd,k), delp(isd,jsd,k), ptc(isd,jsd,k),  pt(isd,jsd,k),      &
                   u(isd,jsd,k),    v(isd,jsd,k),   w(isd:,jsd:,k),  uc(isd,jsd,k),      &
                   vc(isd,jsd,k),   ua(isd,jsd,k),  va(isd,jsd,k), divgd(isd,jsd,k),   &
@@ -795,6 +811,7 @@ contains
                   nord_k, nord_v(k), nord_w, nord_t, flagstruct%dddmp, d2_divg, flagstruct%d4_bg,  &
                   damp_vt(k), damp_w, damp_t, d_con_k, &
                   hydrostatic, gridstruct, flagstruct, bd)
+
 
        if((.not.flagstruct%use_old_omega) .and. last_step ) then
 ! Average horizontal "convergence" to cell center
@@ -2259,7 +2276,7 @@ do 1000 j=jfirst,jlast
    real logp(bd%isd:bd%ied)
    real logp_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km+1)
    real pkz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km)
-   !real gz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km+1)
+   real gz_temp(bd%isd:bd%ied,bd%jsd:bd%jed,km+1)
    integer i, j, k
    integer ifirst, ilast
    integer jfirst, jlast
