@@ -30,6 +30,8 @@ module init_hydro_mod
       use fv_arrays_mod,      only: R_GRID
       use fms_mod,            only: FATAL, stdlog, mpp_error, check_nml_error
       use mpp_mod,            only: input_nml_file
+      use interp_mod,         only: linear_log_interp
+      use netcdf
 !     use fv_diagnostics_mod, only: prt_maxmin
 
       implicit none
@@ -46,7 +48,9 @@ module init_hydro_mod
 !           surface_pressure
 !
 
-     namelist /initialisation_nml/ init_type, ts, t_strat, S, f, tau_sw, tau_lw, Tint, surface_pressure      
+      namelist /initialisation_nml/ init_type, ts, t_strat, S, f, tau_sw, tau_lw, Tint, surface_pressure,&
+           tp_file
+      
 ! Default values of namelist arguments
       integer :: init_type = 1   ! Select initialisation type:
 ! 1: Isothermal atmosphere
@@ -65,6 +69,9 @@ module init_hydro_mod
       real  :: tau_sw, tau_lw  ! Total SW and LW fluxes for the atmosphere  
       real  :: Tint            ! Internal temperature
 
+! Required for tp_file setup
+      character(len=60) :: tp_file
+      
 contains
 
 !-------------------------------------------------------------------------------
@@ -746,7 +753,9 @@ contains
           enddo
        enddo
 
-
+! Init from profile
+    case(5)
+       call read_tp_from_nc(is,ie,js,je,num_levels,pf,Tf)
     end select
 
     if (is_master()) then
@@ -758,4 +767,64 @@ contains
     endif
   end subroutine tp_init
 
+  subroutine read_tp_from_nc(is,ie,js,je,npz,p,T)
+    integer, intent(in)              :: is,ie,js,je,npz
+    real, dimension(npz), intent(in)  :: p
+    real, dimension(is:ie,js:je,npz), intent(out) :: T
+    real, allocatable :: p_dat(:), T_dat(:)
+    
+    integer :: ierr, ncid, idv_t, idv_p, idd_p, ndat, k
+    integer :: i,j,m(1),z
+    
+    ierr = nf90_open(trim(tp_file), 0, ncid)
+    call handle_err(ierr)
+
+    ! Pressure dimension (get length)
+    ierr = nf90_inq_dimid(ncid, "pfull", idd_p)
+    call handle_err(ierr)
+    ierr = nf90_inquire_dimension(ncid, idd_p, len=ndat)
+    call handle_err(ierr)
+
+    allocate(p_dat(ndat), T_dat(ndat))
+
+    ! Variables
+    ierr = nf90_inq_varid(ncid, "pfull", idv_p)
+    call handle_err(ierr)
+    ierr = nf90_inq_varid(ncid, "Tf", idv_t)
+    call handle_err(ierr)
+    ierr = nf90_get_var(ncid, idv_p, p_dat)
+    call handle_err(ierr)
+    ierr = nf90_get_var(ncid, idv_t, T_dat)
+    call handle_err(ierr)
+
+! Interpolate values - note default is to extrapolate at both bottom and top if pressure
+! is not in the range of data provided
+    
+    do k=1,npz
+       m = minloc(abs(p_dat - p(k)))
+       z = m(1)
+       if (p(k) .lt. p_dat(z) .and. z .ne. 1) z = z-1
+       if (z .eq. ndat) z = z-1
+
+       call linear_log_interp(p(k), p_dat(z), p_dat(z+1), T_dat(z), T_dat(z+1), T(is,js,k))
+
+       do j=js,je
+          do i=is,ie
+             T(i,j,k) = T(is,js,k)
+          enddo
+       enddo
+    enddo
+    
+    
+  end subroutine read_tp_from_nc
+
+  subroutine handle_err(status)
+    integer, intent(in) :: status
+
+    if (status /= nf90_noerr) then
+       write(*,*) trim(nf90_strerror(status))
+       stop "Stopped" 
+    endif
+  end subroutine handle_err
+  
 end module init_hydro_mod
