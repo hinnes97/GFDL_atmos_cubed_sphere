@@ -70,7 +70,7 @@ module init_hydro_mod
       real  :: Tint            ! Internal temperature
 
 ! Required for tp_file setup
-      character(len=60) :: tp_file
+      character(len=200) :: tp_file
       
 contains
 
@@ -775,7 +775,7 @@ contains
     
     integer :: ierr, ncid, idv_t, idv_p, idd_p, ndat, k
     integer :: i,j,m(1),z
-    
+
     ierr = nf90_open(trim(tp_file), 0, ncid)
     call handle_err(ierr)
 
