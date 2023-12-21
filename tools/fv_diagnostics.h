@@ -33,8 +33,9 @@
            id_qn, id_qn200, id_qn500, id_qn850, id_qp,            &
            id_qdt, id_acly, id_acl, id_acl2,                              &
            id_dbz, id_maxdbz, id_basedbz, id_dbz4km, id_dbztop, id_dbz_m10C, &
-           id_ctz, id_w1km, id_wmaxup, id_wmaxdn, id_cape, id_cin, id_brn, id_shear06
+           id_ctz, id_w1km, id_wmaxup, id_wmaxdn, id_cape, id_cin, id_brn, id_shear06, id_relhum
 
+ 
 ! Selected theta-level fields from 3D variables:
  integer :: id_pv350K, id_pv550K
 

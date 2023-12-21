@@ -49,7 +49,7 @@ module fv_diagnostics_mod
 
  use fv_arrays_mod, only: max_step 
  use gfdl_mp_mod, only: wqs, mqs3d, qs_init, c_liq, rad_ref
-
+ use sat_props_mod, only: sat_vp
  use fv_diag_column_mod, only: fv_diag_column_init, sounding_column, debug_column
 
  implicit none
@@ -1092,6 +1092,11 @@ contains
        id_dbz_m10C = register_diag_field ( trim(field), 'm10C_reflectivity', axes(1:2), time, &
                 'Reflectivity at -10C level', 'm', missing_value=missing_value)
 
+
+!HII added
+       id_relhum = register_diag_field(trim(field), 'relhum', axes(1:3), time, &
+            'relative humidity', 'none', missing_value=missing_value)
+
 !--------------------------
 ! Extra surface diagnostics:
 !--------------------------
@@ -1518,7 +1523,7 @@ contains
     integer :: isd, ied, jsd, jed, npz, itrac
     integer :: ngc, nwater
 
-    real, allocatable :: a2(:,:),a3(:,:,:),a4(:,:,:), wk(:,:,:), wz(:,:,:), ucoor(:,:,:), vcoor(:,:,:)
+    real, allocatable :: a2(:,:),a3(:,:,:),a4(:,:,:), wk(:,:,:), wz(:,:,:), ucoor(:,:,:), vcoor(:,:,:), a5(:,:,:)
     real, allocatable :: ustm(:,:), vstm(:,:)
     real, allocatable :: slp(:,:), depress(:,:), ws_max(:,:), tc_count(:,:)
     real, allocatable :: u2(:,:), v2(:,:), x850(:,:), var1(:,:), var2(:,:), var3(:,:)
@@ -1540,7 +1545,7 @@ contains
     logical, allocatable :: storm(:,:), cat_crt(:,:)
     real :: tmp2, pvsum, e2, einf, qm, mm, maxdbz, allmax, rgrav, cv_vapor
     real, allocatable :: cvm(:)
-    integer :: Cl, Cl2, k1, k2
+    integer :: Cl, Cl2, k1, k2, vap
 
     !!! CLEANUP: does it really make sense to have this routine loop over Atm% anymore? We assume n=1 below anyway
 
@@ -3722,6 +3727,29 @@ contains
        if(id_omga > 0) used=send_data(id_omga, Atm(n)%omga(isc:iec,jsc:jec,:), Time)
        if(id_diss > 0) used=send_data(id_diss, Atm(n)%diss_est(isc:iec,jsc:jec,:), Time)
 
+       ! HII added own relative humidity variable
+       if(id_relhum > 0 ) then
+          vap =  get_tracer_index (MODEL_ATMOS, 'vapour')
+          allocate(a5(isc:iec,jsc:jec,1:npz))
+          if (allocated(a3)) deallocate(a3)
+          allocate(a3(isc:iec,jsc:jec,1:npz))
+          do k=1,npz
+             do j=jsc,jec
+                do i=isc,iec
+                   !Saturation vapour pressure
+                   call sat_vp(Atm(n)%pt(i,j,k), a3(i,j,k))
+                   ! Mixing ratio of water x = p_h2o / p
+                   a5(i,j,k) = Atm(n)%q(i,j,k,vap)/(18.00/2.288166 - (18.00/2.288166 - 1)*Atm(n)%q(i,j,k,vap))
+                   ! Relative humidity = x * p/p_sat
+                   a3(i,j,k) = a5(i,j,k) * (Atm(n)%delp(i,j,k)/(Atm(n)%peln(i,k+1,j) - Atm(n)%peln(i,k,j))) / a3(i,j,k)
+                enddo
+             enddo
+          enddo
+          used = send_data(id_relhum, a3, Time)
+          deallocate(a5, a3)
+       endif
+       
+       
        allocate( a3(isc:iec,jsc:jec,npz) )
        if(id_theta_e > 0 .or.                                              &     
           id_theta_e100>0 .or. id_theta_e200>0 .or. id_theta_e250>0 .or. id_theta_e300>0 .or. &

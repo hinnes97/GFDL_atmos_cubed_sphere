@@ -601,6 +601,7 @@ contains
     endif
 
 
+    no_tendency = .false.
     if ( .not. no_tendency ) then
        call timing_on('EXO_TEND')
        call Exo_Tend(npx, npy, npz, is, ie, js, je, ng, nq, &
